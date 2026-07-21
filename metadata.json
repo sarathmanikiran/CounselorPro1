@@ -1,0 +1,8 @@
+{
+  "name": "CounselorPro",
+  "description": "An interactive web options counseling simulator for AP EAPCET and TS EAMCET engineering admissions, featuring mock allotments and AI strategy guidance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
