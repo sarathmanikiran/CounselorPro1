@@ -1,7 +1,5 @@
 import { VercelRequest, VercelResponse } from "@vercel/node";
-import { getAuth } from "firebase-admin/auth";
-import fs from "fs";
-import path from "path";
+import admin from "firebase-admin";
 import { getFirestoreDb, setCachedColleges, setFirestoreUnavailable } from "../_lib/index";
 
 export const config = { maxDuration: 60 };
@@ -33,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Verify the Firebase ID Token using firebase-admin Auth
-    const decodedToken = await getAuth().verifyIdToken(idToken);
+    const decodedToken = await (admin as any).auth().verifyIdToken(idToken);
     const email = decodedToken.email || "";
 
     if (email !== "sarathdasireddy369@gmail.com") {
@@ -96,7 +94,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             console.log(`Cleared ${existingSnapshot.size} stale database records in ${deletePromises.length} batches for ${combExam}.`);
           }
         } catch (clearErr: any) {
-          console.warn(`Non-blocking error during collection cleaning for ${combExam}:`, clearErr.message);
+          console.error(`Error during collection cleaning for ${combExam}:`, clearErr);
         }
       });
       await Promise.all(cleanPromises);
@@ -143,7 +141,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const p = writeBatch.commit().then(() => {
           successCount += chunk.length;
         }).catch((error: any) => {
-          console.error(`Failed to commit write batch:`, error);
+          console.error(`Failed to commit write batch in chunkIndex ${chunkIndex}:`, error);
           failCount += chunk.length;
         });
         writePromises.push(p);
@@ -173,7 +171,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
   } catch (authErr: any) {
-    console.error("Authentication or authorization failed:", authErr.message);
-    return res.status(401).json({ error: "Authorization Failed: Invalid or expired Firebase ID token.", details: authErr.message });
+    console.error("Full request handler exception:", authErr);
+    return res.status(500).json({ error: "Server Error: Request failed", details: authErr.message });
   }
 }

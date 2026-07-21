@@ -1,5 +1,4 @@
-import { initializeApp, cert, getApps, getApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import admin from "firebase-admin";
 import { GoogleGenAI } from "@google/genai";
 
 export function getServiceAccount() {
@@ -97,10 +96,11 @@ export function getFirestoreDb() {
   try {
     const serviceAccount = getServiceAccount();
     if (serviceAccount) {
-      const adminApp = getApps().length === 0 
-        ? initializeApp({ credential: cert(serviceAccount as any), projectId: serviceAccount.project_id })
-        : getApp();
-      firestoreDb = getFirestore(adminApp);
+      const adminModule = admin as any;
+      const adminApp = adminModule.apps.length === 0 
+        ? adminModule.initializeApp({ credential: adminModule.credential.cert(serviceAccount as any), projectId: serviceAccount.project_id })
+        : adminModule.app();
+      firestoreDb = adminModule.firestore(adminApp);
       console.log("Firebase Admin successfully initialized on the serverless function.");
     } else {
       console.log("Firebase credentials not fully set up in environment. Firestore features will fall back gracefully.");
