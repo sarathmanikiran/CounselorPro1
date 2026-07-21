@@ -20,6 +20,10 @@ export default function AdminModal({ isOpen, onClose, onUploadSuccess }: AdminMo
   const [status, setStatus] = useState<'idle' | 'parsing' | 'ready' | 'uploading' | 'success' | 'error'>('idle');
   const [log, setLog] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState('');
+  const [processedRecords, setProcessedRecords] = useState(0);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [processedChunks, setProcessedChunks] = useState(0);
+  const [totalChunks, setTotalChunks] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Firebase integration states
@@ -179,47 +183,84 @@ export default function AdminModal({ isOpen, onClose, onUploadSuccess }: AdminMo
 
     setStatus('uploading');
     appendLog(`Initiating secure administrator pipeline...`);
-    appendLog(`Splitting dataset into chunks of 300 entries for safety...`);
 
-    const chunkSize = 300;
-    const totalChunks = Math.ceil(parsedData.length / chunkSize);
-    appendLog(`Total chunks to process: ${totalChunks}`);
+    const chunkSize = 75; // Conservative chunk size (50-100 records per request)
+    const tChunks = Math.ceil(parsedData.length / chunkSize);
+    
+    setTotalRecords(parsedData.length);
+    setProcessedRecords(0);
+    setTotalChunks(tChunks);
+    setProcessedChunks(0);
+
+    appendLog(`Splitting dataset into conservative chunks of ${chunkSize} entries for Firestore and Vercel safety...`);
+    appendLog(`Total chunks to process: ${tChunks}`);
+
+    // Delay helper for exponential backoff
+    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
     try {
-      for (let index = 0; index < totalChunks; index++) {
+      for (let index = 0; index < tChunks; index++) {
         const start = index * chunkSize;
         const end = Math.min(start + chunkSize, parsedData.length);
         const chunk = parsedData.slice(start, end);
-        const isLast = index === totalChunks - 1;
+        const isLast = index === tChunks - 1;
 
-        appendLog(`Uploading chunk ${index + 1} of ${totalChunks} (isLastChunk: ${isLast})...`);
+        let attempt = 1;
+        const maxAttempts = 3;
+        let success = false;
+        let responseJson: any = null;
 
-        const res = await fetch(`/api/admin/upload-colleges?chunkIndex=${index}&isLastChunk=${isLast}`, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${idToken}`
-          },
-          body: JSON.stringify(chunk)
-        });
+        while (attempt <= maxAttempts && !success) {
+          try {
+            appendLog(`Uploading chunk ${index + 1} of ${tChunks} (entries ${start + 1}-${end}, attempt ${attempt}/${maxAttempts})...`);
 
-        let result: any;
-        const responseText = await res.text();
-        try {
-          result = JSON.parse(responseText);
-        } catch (parseErr: any) {
-          throw new Error(`Failed to parse server response as JSON. Server might have timed out or crashed. Raw response (truncated): ${responseText.substring(0, 400)}${responseText.length > 400 ? '...' : ''}`);
+            const res = await fetch(`/api/admin/upload-colleges?chunkIndex=${index}&isLastChunk=${isLast}`, {
+              method: 'POST',
+              headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
+              },
+              body: JSON.stringify(chunk)
+            });
+
+            const contentType = res.headers.get("content-type") || "";
+            const responseText = await res.text();
+
+            if (!contentType.includes("application/json")) {
+              throw new Error(`Server returned HTML or raw error instead of JSON. Status: ${res.status}. Raw Response: ${responseText.substring(0, 200)}...`);
+            }
+
+            try {
+              responseJson = JSON.parse(responseText);
+            } catch (parseErr: any) {
+              throw new Error(`Failed to parse server response as JSON. Raw response: ${responseText.substring(0, 200)}`);
+            }
+
+            if (!res.ok) {
+              throw new Error(responseJson.error || responseJson.details || `Server returned status ${res.status}`);
+            }
+
+            success = true;
+          } catch (chunkErr: any) {
+            appendLog(`WARNING: Chunk ${index + 1} failed on attempt ${attempt}: ${chunkErr.message}`);
+            if (attempt < maxAttempts) {
+              const backoffMs = attempt * 1500;
+              appendLog(`Waiting ${backoffMs / 1000}s before retrying chunk ${index + 1}...`);
+              await delay(backoffMs);
+            } else {
+              throw new Error(`Chunk ${index + 1} failed after ${maxAttempts} attempts. Last error: ${chunkErr.message}`);
+            }
+          }
+          attempt++;
         }
 
-        if (!res.ok) {
-          throw new Error(result.error || result.details || `Server returned error status ${res.status} on chunk ${index + 1}.`);
-        }
-
-        appendLog(`Successfully uploaded chunk ${index + 1}/${totalChunks}: ${result.details || result.message}`);
+        setProcessedRecords(end);
+        setProcessedChunks(index + 1);
+        appendLog(`Successfully uploaded chunk ${index + 1}/${tChunks}: ${responseJson?.details || responseJson?.message || 'Written to Firestore'}`);
       }
 
       setStatus('success');
-      appendLog(`Successfully synchronized all ${parsedData.length.toLocaleString()} documents in ${totalChunks} sequential batches!`);
+      appendLog(`Successfully synchronized all ${parsedData.length.toLocaleString()} documents in ${tChunks} sequential batches!`);
       if (onUploadSuccess) {
         onUploadSuccess();
       }
@@ -236,6 +277,10 @@ export default function AdminModal({ isOpen, onClose, onUploadSuccess }: AdminMo
     setStatus('idle');
     setLog([]);
     setErrorMsg('');
+    setProcessedRecords(0);
+    setTotalRecords(0);
+    setProcessedChunks(0);
+    setTotalChunks(0);
   };
 
   const handleGoogleSignIn = async () => {
@@ -457,6 +502,30 @@ export default function AdminModal({ isOpen, onClose, onUploadSuccess }: AdminMo
                       </button>
                     )}
                   </div>
+
+                  {status === 'uploading' && (
+                    <div className="border border-slate-200 rounded-xl p-4 bg-emerald-50/20 space-y-2.5 shadow-3xs" id="upload-progress-container">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                          <RefreshCw className="w-3.5 h-3.5 text-emerald-600 animate-spin" />
+                          Uploading database...
+                        </span>
+                        <span className="font-mono text-[10px] font-bold text-emerald-700 bg-emerald-100/50 px-2 py-0.5 rounded-full">
+                          {totalChunks > 0 ? Math.round((processedChunks / totalChunks) * 100) : 0}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden shadow-inner">
+                        <div 
+                          className="bg-emerald-600 h-full rounded-full transition-all duration-300" 
+                          style={{ width: `${totalChunks > 0 ? (processedChunks / totalChunks) * 100 : 0}%` }}
+                        ></div>
+                      </div>
+                      <div className="flex justify-between text-[10px] font-mono text-slate-500 leading-none">
+                        <span>RECORDS: {processedRecords.toLocaleString()} / {totalRecords.toLocaleString()}</span>
+                        <span>CHUNKS: {processedChunks} / {totalChunks}</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Logger Console Box */}
                   <div className="space-y-1.5">

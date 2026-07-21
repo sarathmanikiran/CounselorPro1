@@ -5,7 +5,9 @@ import fs from "fs";
 import { exec } from "child_process";
 import { GoogleGenAI } from "@google/genai";
 import { createServer as createViteServer } from "vite";
-import admin from "firebase-admin";
+import { initializeApp, cert, getApps, getApp } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
 import compression from "compression";
 
 dotenv.config();
@@ -106,11 +108,10 @@ let firestoreDb: any = null;
 try {
   const serviceAccount = getServiceAccount();
   if (serviceAccount) {
-    const adminModule = admin as any;
-    const adminApp = adminModule.apps.length === 0 
-      ? adminModule.initializeApp({ credential: adminModule.credential.cert(serviceAccount as any), projectId: serviceAccount.project_id })
-      : adminModule.app();
-    firestoreDb = adminModule.firestore(adminApp);
+    const adminApp = getApps().length === 0 
+      ? initializeApp({ credential: cert(serviceAccount as any), projectId: serviceAccount.project_id })
+      : getApp();
+    firestoreDb = getFirestore(adminApp);
     console.log("Firebase Admin successfully initialized on the backend.");
   } else {
     console.log("Firebase credentials not fully set up in environment. Firestore features will fall back gracefully.");
@@ -481,7 +482,7 @@ app.post("/api/admin/upload-colleges", async (req, res) => {
     }
 
     // Verify the Firebase ID Token using firebase-admin Auth
-    const decodedToken = await (admin as any).auth().verifyIdToken(idToken);
+    const decodedToken = await getAuth().verifyIdToken(idToken);
     const email = decodedToken.email || "";
 
     if (email !== "sarathdasireddy369@gmail.com") {

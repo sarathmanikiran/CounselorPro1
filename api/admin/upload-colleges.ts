@@ -1,5 +1,5 @@
 import { VercelRequest, VercelResponse } from "@vercel/node";
-import admin from "firebase-admin";
+import { getAuth } from "firebase-admin/auth";
 import { getFirestoreDb, setCachedColleges, setFirestoreUnavailable } from "../_lib/index";
 
 export const config = { maxDuration: 60 };
@@ -31,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Verify the Firebase ID Token using firebase-admin Auth
-    const decodedToken = await (admin as any).auth().verifyIdToken(idToken);
+    const decodedToken = await getAuth().verifyIdToken(idToken);
     const email = decodedToken.email || "";
 
     if (email !== "sarathdasireddy369@gmail.com") {
@@ -69,7 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // B. Clear existing documents ONLY on the first chunk of the upload series (chunkIndex === 0)
     if (chunkIndex === 0) {
-      console.log(`Performing concurrent database clean-up for combinations: ${Array.from(combinations).join(', ')}...`);
+      console.log(`Performing concurrent database clean-up (up to 500 documents) for combinations: ${Array.from(combinations).join(', ')}...`);
       const cleanPromises = Array.from(combinations).map(async (comb) => {
         const [combExam, combYearStr] = comb.split("|");
         const combYear = Number(combYearStr);
@@ -77,6 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const existingSnapshot = await db.collection("colleges")
             .where("exam", "==", combExam)
             .where("year", "==", combYear)
+            .limit(500)
             .get();
           if (!existingSnapshot.empty) {
             const docs = existingSnapshot.docs;
@@ -91,7 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               deletePromises.push(deleteBatch.commit());
             }
             await Promise.all(deletePromises);
-            console.log(`Cleared ${existingSnapshot.size} stale database records in ${deletePromises.length} batches for ${combExam}.`);
+            console.log(`Cleared ${existingSnapshot.size} stale database records in ${deletePromises.length} batches for ${combExam}. Remaining records will be overwritten safely via deterministic IDs.`);
           }
         } catch (clearErr: any) {
           console.error(`Error during collection cleaning for ${combExam}:`, clearErr);
@@ -134,7 +135,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             year: entryYear
           };
 
-          const docRef = db.collection('colleges').doc();
+          // Generate a highly deterministic and safe document ID to avoid duplicate data on retries or overlapping uploads
+          const docId = `${entryExam}_${entryYear}_${entry.inst_code}_${entry.branch_code}`.toUpperCase().replace(/[^A-Z0-9-_]/g, '_');
+          const docRef = db.collection('colleges').doc(docId);
           writeBatch.set(docRef, preparedEntry);
         }
 
@@ -148,6 +151,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       await Promise.all(writePromises);
+      if (failCount > 0) {
+        throw new Error(`Failed to commit ${failCount} documents in write batch.`);
+      }
     } catch (writeErr: any) {
       console.error("Firestore batch write error:", writeErr);
       throw writeErr;
