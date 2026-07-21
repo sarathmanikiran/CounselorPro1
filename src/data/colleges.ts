@@ -96,7 +96,17 @@ export async function loadRealCollegesForExam(exam: ExamType | null, stream: 'MP
   if (!exam) return 0;
   
   const examGroup = getExamGroup(exam, stream);
-  
+  const cacheKey = `${examGroup}_${year}`;
+
+  // Serve from in-memory cache if available (Requirement 5)
+  if (clientCache[cacheKey]) {
+    console.log(`[CLIENT CACHE HIT] Serving ${clientCache[cacheKey].length} colleges for ${cacheKey} from cache.`);
+    COLLEGES_DB.length = 0;
+    COLLEGES_DB.push(...clientCache[cacheKey]);
+    COLLEGES_SOURCE = `Static Cache (${examGroup})`;
+    return COLLEGES_DB.length;
+  }
+
   console.log(`[CLIENT FETCHING] Directly querying Firestore using Firebase App instance for exam: ${examGroup}, year: ${year}...`);
 
   try {
@@ -122,6 +132,9 @@ export async function loadRealCollegesForExam(exam: ExamType | null, stream: 'MP
 
     const normalized = fetchedColleges.map((item, idx) => normalizeCollege(item, idx));
     
+    // Cache the normalized colleges
+    clientCache[cacheKey] = normalized;
+
     // Update COLLEGES_DB in-place
     COLLEGES_DB.length = 0;
     COLLEGES_DB.push(...normalized);
@@ -130,8 +143,53 @@ export async function loadRealCollegesForExam(exam: ExamType | null, stream: 'MP
     console.log(`[CLIENT SUCCESS] Successfully loaded ${normalized.length} colleges directly from Firestore using Firebase Web SDK.`);
     return normalized.length;
   } catch (err: any) {
-    console.error(`[CLIENT ERROR] Direct Firestore query failed:`, err);
-    throw err;
+    console.warn(`[CLIENT WARN] Direct Firestore query failed or returned permissions error:`, err.message || err);
+    
+    // If client SDK query fails (e.g. Missing or insufficient permissions), fallback to server API endpoint proxy
+    try {
+      console.log(`[CLIENT FALLBACK] Requesting real-time database via server API endpoint proxy: /api/colleges?exam=${examGroup}&year=${year}`);
+      const res = await fetch(`/api/colleges?exam=${examGroup}&year=${year}`);
+      if (!res.ok) throw new Error(`Server API returned error status: ${res.status}`);
+      const data = await res.json();
+      if (data && Array.isArray(data.colleges) && data.colleges.length > 0) {
+        const normalized = data.colleges.map((item, idx) => normalizeCollege(item, idx));
+        clientCache[cacheKey] = normalized;
+        COLLEGES_DB.length = 0;
+        COLLEGES_DB.push(...normalized);
+        COLLEGES_SOURCE = data.source || 'Live Database (Server Proxy)';
+        console.log(`[CLIENT SUCCESS] Loaded ${normalized.length} colleges from live server API proxy successfully.`);
+        return normalized.length;
+      } else {
+        throw new Error(`Empty result set from server API: No records for "${examGroup}" in year ${year}.`);
+      }
+    } catch (apiErr: any) {
+      console.warn(`[CLIENT API WARN] Failed to load from server API proxy:`, apiErr.message || apiErr);
+      
+      // Secondary fallback to static files (e.g. public/data/...)
+      try {
+        const filename = `${examGroup}_${year}.json`;
+        console.log(`[CLIENT FALLBACK] Requesting static data file: /data/${filename}`);
+        const res = await fetch(`/data/${filename}`);
+        if (!res.ok) {
+          throw new Error(`Static file /data/${filename} returned status ${res.status}`);
+        }
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const normalized = data.map((item, idx) => normalizeCollege(item, idx));
+          clientCache[cacheKey] = normalized;
+          COLLEGES_DB.length = 0;
+          COLLEGES_DB.push(...normalized);
+          COLLEGES_SOURCE = `Static File Fallback (${examGroup}_${year})`;
+          console.log(`[CLIENT SUCCESS] Loaded ${normalized.length} colleges from static JSON file fallback.`);
+          return normalized.length;
+        } else {
+          throw new Error(`Empty result set in static file fallback for "${examGroup}" in year ${year}.`);
+        }
+      } catch (staticErr: any) {
+        console.error('[CLIENT FATAL] All college retrieval strategies failed:', staticErr.message || staticErr);
+        throw new Error(`Failed to load colleges database: ${staticErr.message || staticErr}`);
+      }
+    }
   }
 }
 
