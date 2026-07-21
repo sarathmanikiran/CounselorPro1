@@ -1,5 +1,6 @@
-import { initializeApp, cert, getApps, getApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { initializeApp, cert, getApps, getApp, App } from "firebase-admin/app";
+import { getFirestore, Firestore } from "firebase-admin/firestore";
+import { getAuth, Auth } from "firebase-admin/auth";
 import { GoogleGenAI } from "@google/genai";
 
 export function getServiceAccount() {
@@ -85,31 +86,69 @@ export function getServiceAccount() {
   };
 }
 
-// Lazy initialization of Firebase Admin
-let firestoreDb: any = null;
-let firestoreInitialized = false;
+// Lazy initialization of Firebase Admin App, Database, and Auth
+let firebaseApp: App | null = null;
+let firestoreDb: Firestore | null = null;
+let firebaseAuth: Auth | null = null;
+let firebaseInitialized = false;
 
-export function getFirestoreDb() {
-  if (firestoreInitialized) {
-    return firestoreDb;
+export function getFirebaseApp(): App | null {
+  if (firebaseInitialized) {
+    return firebaseApp;
   }
 
   try {
     const serviceAccount = getServiceAccount();
     if (serviceAccount) {
-      const adminApp = getApps().length === 0 
+      console.log("[FIREBASE INITIALIZATION] Setting up Firebase Admin App...");
+      const apps = getApps();
+      firebaseApp = apps.length === 0 
         ? initializeApp({ credential: cert(serviceAccount as any), projectId: serviceAccount.project_id })
         : getApp();
-      firestoreDb = getFirestore(adminApp);
-      console.log("Firebase Admin successfully initialized on the serverless function.");
+      console.log("[FIREBASE INITIALIZATION] Firebase Admin App successfully initialized.");
     } else {
-      console.log("Firebase credentials not fully set up in environment. Firestore features will fall back gracefully.");
+      console.warn("[FIREBASE INITIALIZATION] Firebase credentials not fully set up in environment.");
     }
-  } catch (err) {
-    console.log("Failed to initialize Firebase Admin in serverless lib:", err);
+  } catch (err: any) {
+    console.error("[FIREBASE INITIALIZATION ERROR] Failed to initialize Firebase Admin App:", {
+      message: err?.message,
+      stack: err?.stack
+    });
   }
-  firestoreInitialized = true;
-  return firestoreDb;
+  firebaseInitialized = true;
+  return firebaseApp;
+}
+
+export function getFirestoreDb(): Firestore | null {
+  const app = getFirebaseApp();
+  if (!app) return null;
+  if (firestoreDb) return firestoreDb;
+  try {
+    firestoreDb = getFirestore(app);
+    return firestoreDb;
+  } catch (err: any) {
+    console.error("[FIREBASE INITIALIZATION ERROR] Failed to obtain Firestore client:", {
+      message: err?.message,
+      stack: err?.stack
+    });
+    return null;
+  }
+}
+
+export function getFirebaseAuth(): Auth | null {
+  const app = getFirebaseApp();
+  if (!app) return null;
+  if (firebaseAuth) return firebaseAuth;
+  try {
+    firebaseAuth = getAuth(app);
+    return firebaseAuth;
+  } catch (err: any) {
+    console.error("[FIREBASE INITIALIZATION ERROR] Failed to obtain Auth client:", {
+      message: err?.message,
+      stack: err?.stack
+    });
+    return null;
+  }
 }
 
 export function mapDistrictAbbr(dist: string): string {

@@ -40,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const firestoreDb = getFirestoreDb();
     if (firestoreDb && !firestoreUnavailable) {
       try {
-        let query = firestoreDb.collection("colleges");
+        let query: any = firestoreDb.collection("colleges");
         if (examParam) {
           query = query.where("exam", "==", examParam);
         }
