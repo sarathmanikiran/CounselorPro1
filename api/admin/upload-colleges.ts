@@ -159,7 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     let staticRegenMsg = "";
     if (isLastChunk) {
-      staticRegenMsg = "Data uploaded to Firestore successfully. To publish these changes to the live site, push any commit (or use Vercel's 'Redeploy' button) to trigger a new build — the build step regenerates the static JSON files from Firestore automatically.";
+      staticRegenMsg = "To publish these changes to the live site, please trigger a Vercel redeploy (e.g., click 'Redeploy' on your Vercel Dashboard, or push a commit). This is necessary because Vercel pre-compiles the static JSON files from Firestore for high performance.";
     } else {
       staticRegenMsg = `Chunk ${chunkIndex + 1} uploaded successfully.`;
     }
