@@ -32,7 +32,7 @@ export default function FinalReview({ profile, selectedOptions, onBack, onFinish
         const collegeDb = collegesList.find(c => c.id === option.collegeId);
         
         if (collegeDb) {
-          const cutoff = getCollegeCutoff(collegeDb, profile.category);
+          const cutoff = getCollegeCutoff(collegeDb, profile.category, profile.ews_status);
           
           // Local/Non-local penalty: if college region doesn't match student's region, add difficulty
           // In real counselling, 85% of seats are reserved for local region. So non-local cutoffs are much harder!
@@ -44,7 +44,7 @@ export default function FinalReview({ profile, selectedOptions, onBack, onFinish
               allotted: true,
               college: collegeDb,
               optionNumber: option.priority,
-              categoryUsed: profile.category,
+              categoryUsed: profile.ews_status ? `${profile.category} (EWS)` : profile.category,
               allotmentType: collegeDb.region === profile.region ? "Local Quota" : "Non-Local Quota",
               message: `You successfully matched historical seat cutoff boundaries at priority order #${option.priority}.`
             };

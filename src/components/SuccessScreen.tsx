@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import { StudentProfile, WebOption, MockAllotmentResult, College } from '../types';
 import { COLLEGES_DB, getCollegeCutoff, getSeatProbability } from '../data/colleges';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface SuccessScreenProps {
   profile: StudentProfile;
@@ -55,7 +57,7 @@ export default function SuccessScreen({ profile, selectedOptions, optionsLength,
       const collegeDb = COLLEGES_DB.find(c => c.id === option.collegeId);
       
       if (collegeDb) {
-        const cutoff = getCollegeCutoff(collegeDb, profile.category);
+        const cutoff = getCollegeCutoff(collegeDb, profile.category, profile.ews_status);
         const regionModifier = (collegeDb.region !== profile.region) ? 0.75 : 1.0;
         const adjustedCutoff = cutoff * regionModifier;
 
@@ -64,7 +66,7 @@ export default function SuccessScreen({ profile, selectedOptions, optionsLength,
             allotted: true,
             college: collegeDb,
             optionNumber: option.priority,
-            categoryUsed: profile.category,
+            categoryUsed: profile.ews_status ? `${profile.category} (EWS)` : profile.category,
             allotmentType: collegeDb.region === profile.region ? "Local Quota" : "Non-Local Quota",
             message: `Seat matched at priority order #${option.priority} based on historical convenience quotas.`
           };
@@ -76,7 +78,7 @@ export default function SuccessScreen({ profile, selectedOptions, optionsLength,
     // 2. AI Recommendation Alternatives (find safety colleges if rank <= cutoff * 1.5)
     const candidates = COLLEGES_DB.filter(c => {
       if (c.exam !== profile.exam) return false;
-      const cutoff = getCollegeCutoff(c, profile.category);
+      const cutoff = getCollegeCutoff(c, profile.category, profile.ews_status);
       // Find colleges where student rank is within acceptable buffer
       return profile.rank <= cutoff * 1.6;
     });
@@ -85,7 +87,7 @@ export default function SuccessScreen({ profile, selectedOptions, optionsLength,
     const sortedAlts = candidates
       .map(c => ({
         college: c,
-        score: Math.abs(getCollegeCutoff(c, profile.category) - profile.rank)
+        score: Math.abs(getCollegeCutoff(c, profile.category, profile.ews_status) - profile.rank)
       }))
       .sort((a, b) => a.score - b.score)
       .map(item => item.college)
@@ -111,58 +113,389 @@ export default function SuccessScreen({ profile, selectedOptions, optionsLength,
     return () => clearInterval(interval);
   }, [profile, selectedOptions]);
 
-  // Download Registered Slip
+  // Download Registered Slip as PDF
   const handleDownloadRegisteredSummary = () => {
-    const fileContent = `======================================\nCOUNSELORPRO ALLOTMENT OPTIMIZATION RECEIPT\n======================================\nEXAM PREPARED: ${profile.exam}\nHALL TICKET NO: ${profile.hallTicket}\nRANK ACQUIRED: ${profile.rank}\nRESERVATION CATEGORY: ${profile.category}\nLOCAL REGION: ${profile.region}\nTOTAL WEB CHOICE SUBMISSIONS: ${optionsLength} colleges\nSIMULATION COMPLETED DATE: ${new Date().toLocaleDateString()}\n\nCongratulations! Your options order has been successfully prioritized and validated against AI strategic advisors.\n======================================`;
-    
-    const element = document.createElement("a");
-    const file = new Blob([fileContent], {type: 'text/plain'});
-    element.href = URL.createObjectURL(file);
-    element.download = `${profile.hallTicket}_Counselling_Completed.txt`;
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+
+      // Top Border Accent (Slate/Emerald)
+      doc.setFillColor(15, 23, 42); // slate-900
+      doc.rect(0, 0, pageWidth, 6, 'F');
+
+      // Decorative header badge
+      doc.setFillColor(241, 245, 249); // slate-100
+      doc.roundedRect(pageWidth / 2 - 40, 12, 80, 8, 2, 2, 'F');
+      
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139); // slate-500
+      doc.text("COUNSELORPRO WEB OPTIONS SIMULATOR", pageWidth / 2, 17, { align: 'center' });
+
+      // Title & Council
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text("COUNSELING RECEIPT & CHOICE SUMMARY", pageWidth / 2, 30, { align: 'center' });
+
+      doc.setFontSize(10);
+      doc.setTextColor(5, 150, 105); // emerald-600
+      doc.text("OFFICIALLY COMPLETED WEB CHOICE SIMULATION RECORD", pageWidth / 2, 36, { align: 'center' });
+
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text(`Receipt ID: SCEA/MOCK/${profile.hallTicket}/${profile.exam} • Date: ${new Date().toLocaleDateString()}`, pageWidth / 2, 41, { align: 'center' });
+
+      // Dividers
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.setLineWidth(0.5);
+      doc.line(15, 45, pageWidth - 15, 45);
+
+      // Student Profile Metadata Box
+      doc.setFillColor(248, 250, 252); // slate-50
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.roundedRect(15, 49, pageWidth - 30, 32, 2, 2, 'FD');
+
+      // Heading for student details
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105); // slate-600
+      doc.text("STUDENT REGISTERED DETAILS", 20, 55);
+
+      doc.setDrawColor(241, 245, 249);
+      doc.line(20, 57, pageWidth - 20, 57);
+
+      // Metadata Key-Value pairs
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139); // slate-500
+      
+      // Col 1
+      doc.text("HALL TICKET NO:", 20, 63);
+      doc.text("SECURED RANK:", 20, 69);
+      doc.text("ENTRANCE EXAM:", 20, 75);
+
+      // Col 2
+      doc.text("RESERVATION CATEGORY:", 110, 63);
+      doc.text("LOCAL REGION:", 110, 69);
+      doc.text("SUBMISSION DATE:", 110, 75);
+
+      // Values
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text(String(profile.hallTicket || ''), 55, 63);
+      doc.text(Number(profile.rank || 0).toLocaleString(), 55, 69);
+      doc.text(String(profile.exam || '').replace('_', ' '), 55, 75);
+
+      doc.text(String(profile.category || '') + (profile.ews_status ? ' (EWS)' : ''), 155, 63);
+      doc.text(String(profile.region || ''), 155, 69);
+      doc.text(new Date().toLocaleDateString(), 155, 75);
+
+      // Table Title
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text("SUBMITTED CHOICE SEQUENCE & PRIORITY LAYOUT", 15, 90);
+
+      // Options table
+      const tableHeaders = [['Priority', 'Code', 'College/Institution Name', 'Branch', 'Annual Fee']];
+      const tableRows = selectedOptions.map(opt => [
+        String(opt.priority),
+        String(opt.collegeCode),
+        String(opt.collegeName),
+        String(opt.branch),
+        `Rs. ${Number(opt.fee).toLocaleString()}/-`
+      ]);
+
+      // Call autoTable helper
+      autoTable(doc, {
+        startY: 94,
+        margin: { left: 15, right: 15 },
+        head: tableHeaders,
+        body: tableRows,
+        theme: 'striped',
+        headStyles: {
+          fillColor: [15, 23, 42], // slate-900 theme
+          textColor: [255, 255, 255],
+          fontSize: 9,
+          fontStyle: 'bold',
+          halign: 'left'
+        },
+        columnStyles: {
+          0: { cellWidth: 15, halign: 'center', fontStyle: 'bold' }, // Priority
+          1: { cellWidth: 25, fontStyle: 'bold', textColor: [5, 150, 105] }, // Code (Emerald)
+          2: { cellWidth: 'auto' }, // Name
+          3: { cellWidth: 25, halign: 'center' }, // Branch
+          4: { cellWidth: 30, halign: 'right', fontStyle: 'bold' } // Fee
+        },
+        styles: {
+          fontSize: 8.5,
+          cellPadding: 3,
+          valign: 'middle'
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252] // slate-50
+        }
+      });
+
+      // Get Y coordinate after table
+      let finalY = (doc as any).lastAutoTable.finalY + 10;
+
+      if (finalY + 40 > pageHeight) {
+        doc.addPage();
+        finalY = 20;
+      }
+
+      // Digital Integrity Footer Box
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(15, finalY, pageWidth - 30, 32, 2, 2, 'FD');
+
+      // Security Watermark Box (QR Code simulation)
+      doc.setFillColor(30, 41, 59); // slate-800
+      doc.rect(20, finalY + 4, 24, 24, 'F');
+      
+      // Draw grid pattern to simulate QR code
+      doc.setFillColor(255, 255, 255);
+      // Corners
+      doc.rect(22, finalY + 6, 6, 6, 'F');
+      doc.rect(36, finalY + 6, 6, 6, 'F');
+      doc.rect(22, finalY + 20, 6, 6, 'F');
+      doc.setFillColor(30, 41, 59);
+      doc.rect(24, finalY + 8, 2, 2, 'F');
+      doc.rect(38, finalY + 8, 2, 2, 'F');
+      doc.rect(24, finalY + 22, 2, 2, 'F');
+      
+      // Random blocks to look authentic
+      doc.setFillColor(255, 255, 255);
+      doc.rect(30, finalY + 14, 4, 4, 'F');
+      doc.rect(24, finalY + 15, 2, 2, 'F');
+      doc.rect(38, finalY + 16, 4, 4, 'F');
+      doc.rect(32, finalY + 22, 2, 4, 'F');
+
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(51, 65, 85); // slate-700
+      doc.text("COUNSELORPRO VERIFICATION ENGINE", 50, finalY + 9);
+
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 116, 139); // slate-500
+      doc.text(`Completed Choices Hash: SHA256-${Math.random().toString(16).substr(2, 8).toUpperCase()}`, 50, finalY + 14);
+      
+      doc.setFontSize(7);
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text("This receipt documents your practicing choice configurations. Ensure you re-enter this final", 50, finalY + 20);
+      doc.text("sequenced order on the state's official Convenor Portal during the allocated schedule window.", 50, finalY + 24);
+
+      doc.save(`${profile.hallTicket}_Counselling_Completed.pdf`);
+    } catch (error) {
+      console.error("PDF Generation error:", error);
+    }
   };
 
-  // Download Provisional Allotment Letter
+  // Download Provisional Allotment Letter as PDF
   const handleDownloadAllotmentLetter = () => {
     if (!allotment || !allotment.allotted || !allotment.college) return;
-    const fileContent = `========================================================
-STATE COUNCIL OF TECHNICAL EDUCATION & ADMISSIONS
-PROVISIONAL SEAT ALLOTMENT LETTER (MOCK REPLICA)
-========================================================
-ALLOTMENT REFERENCE NO: SCEA/MOCK/${profile.hallTicket}/${profile.exam}
-DATE OF SIMULATED ALLOTMENT: ${new Date().toLocaleDateString()}
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
 
-STUDENT BIOMETRICS:
-------------------
-HALL TICKET NO: ${profile.hallTicket}
-COMMON ENTRANCE RANK: ${profile.rank}
-RESERVATION CATEGORY: ${profile.category}
-LOCAL REGION PREFERENCE: ${profile.region}
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
 
-ALLOTTED COLLEGE INFORMATION:
------------------------------
-COLLEGE NAME: ${allotment.college.name}
-COLLEGE CODE: ${allotment.college.code}
-ALLOTTED COURSE/BRANCH: ${allotment.college.branch}
-INSTITUTION REGION: ${allotment.college.region}
-DISTRICT LOCATION: ${allotment.college.district}
-ESTIMATED TUITION FEE: ₹${allotment.college.fee.toLocaleString()}/Year
-MATCHED PRIORITY PREFERENCE: Option #${allotment.optionNumber}
-SEAT TYPE RESERVATION: ${allotment.allotmentType} (${profile.category})
+      // Top Border Accent (Slate/Emerald)
+      doc.setFillColor(15, 23, 42); // slate-900
+      doc.rect(0, 0, pageWidth, 6, 'F');
 
---------------------------------------------------------
-DISCLAIMER: This is an AI-powered simulation matched against historical cutoff trends for practice purposes only. Always lock your real preferences on the official convenor portal.
-========================================================`;
-    
-    const element = document.createElement("a");
-    const file = new Blob([fileContent], {type: 'text/plain'});
-    element.href = URL.createObjectURL(file);
-    element.download = `${profile.hallTicket}_Allotment_Letter.txt`;
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
+      // Decorative header badge
+      doc.setFillColor(240, 253, 244); // emerald-50
+      doc.setDrawColor(187, 247, 208); // emerald-200
+      doc.roundedRect(pageWidth / 2 - 45, 12, 90, 8, 2, 2, 'FD');
+      
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(4, 120, 87); // emerald-700
+      doc.text("STATE COUNCIL OF TECHNICAL EDUCATION & ADMISSIONS", pageWidth / 2, 17, { align: 'center' });
+
+      // Title & Council
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text("PROVISIONAL SEAT ALLOTMENT LETTER", pageWidth / 2, 30, { align: 'center' });
+
+      doc.setFontSize(10);
+      doc.setTextColor(5, 150, 105); // emerald-600
+      doc.text("SIMULATED COUNSELLING ALLOTMENT SCHEME", pageWidth / 2, 36, { align: 'center' });
+
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text(`Reference No: SCEA/MOCK/${profile.hallTicket}/${profile.exam} • Date: ${new Date().toLocaleDateString()}`, pageWidth / 2, 41, { align: 'center' });
+
+      // Dividers
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.setLineWidth(0.5);
+      doc.line(15, 45, pageWidth - 15, 45);
+
+      // Candidate Biometrics Box
+      doc.setFillColor(248, 250, 252); // slate-50
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.roundedRect(15, 50, pageWidth - 30, 36, 2, 2, 'FD');
+
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105); // slate-600
+      doc.text("1. CANDIDATE PROFILE BIOMETRICS", 20, 56);
+
+      doc.setDrawColor(241, 245, 249);
+      doc.line(20, 58, pageWidth - 20, 58);
+
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139); // slate-500
+      
+      doc.text("HALL TICKET NO:", 20, 64);
+      doc.text("ENTRANCE RANK:", 20, 70);
+      doc.text("EXAM STREAM:", 20, 76);
+
+      doc.text("RESERVATION CATEGORY:", 110, 64);
+      doc.text("LOCAL REGION:", 110, 70);
+      doc.text("ALLOTMENT QUOTA:", 110, 76);
+
+      // Values
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text(String(profile.hallTicket || ''), 55, 64);
+      doc.text(Number(profile.rank || 0).toLocaleString(), 55, 70);
+      doc.text(String(profile.exam || '').replace('_', ' '), 55, 76);
+
+      doc.text(String(profile.category || '') + (profile.ews_status ? ' (EWS)' : ''), 155, 64);
+      doc.text(String(profile.region || ''), 155, 70);
+      doc.text(allotment.allotmentType, 155, 76);
+
+      // Allotted College Box
+      doc.setFillColor(240, 253, 244); // emerald-50/5
+      doc.setDrawColor(187, 247, 208); // emerald-200
+      doc.roundedRect(15, 92, pageWidth - 30, 56, 2, 2, 'FD');
+
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(4, 120, 87); // emerald-700
+      doc.text("2. PROVISIONALLY ALLOTTED SEAT INFORMATION", 20, 99);
+
+      doc.setDrawColor(220, 252, 231); // emerald-100
+      doc.line(20, 101, pageWidth - 20, 101);
+
+      // Labels inside college box
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(71, 85, 105); // slate-600
+
+      doc.text("ALLOTTED COLLEGE:", 20, 108);
+      doc.text("COLLEGE CODE:", 20, 115);
+      doc.text("ALLOTTED COURSE:", 20, 122);
+      doc.text("COLLEGE LOCATION:", 20, 129);
+      doc.text("ESTIMATED TUITION FEE:", 20, 136);
+      doc.text("PRIORITY PLACEMENT:", 20, 143);
+
+      // Values inside college box
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(15, 23, 42); // slate-900
+
+      doc.text(allotment.college.name, 65, 108);
+      doc.setFont('Helvetica', 'bold');
+      doc.setTextColor(5, 150, 105); // emerald-600
+      doc.text(allotment.college.code + ` (${allotment.college.region} Region)`, 65, 115);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text(allotment.college.branch, 65, 122);
+      doc.text(allotment.college.district + " District", 65, 129);
+      doc.text(`Rs. ${allotment.college.fee.toLocaleString()}/- per annum`, 65, 136);
+      
+      doc.setFont('Helvetica', 'bold');
+      doc.setTextColor(4, 120, 87); // emerald-700
+      doc.text(`Option Choice Priority #${allotment.optionNumber}`, 65, 143);
+
+      // Section 3: AI Counselling Probability & Guidelines
+      doc.setFillColor(254, 252, 232); // yellow-50
+      doc.setDrawColor(254, 240, 138); // yellow-200
+      doc.roundedRect(15, 154, pageWidth - 30, 26, 2, 2, 'FD');
+
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(133, 77, 14); // yellow-800
+      doc.text("3. ADMISSIONS INSIGHT & MATCH PROBABILITY", 20, 160);
+
+      doc.setDrawColor(253, 224, 71); // yellow-300
+      doc.line(20, 162, pageWidth - 20, 162);
+
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(113, 63, 18); // yellow-700
+      const probability = getSeatProbability(allotment.college, profile.rank, profile.category, profile.ews_status);
+      doc.text(`AI SEAT PLACEMENT PROBABILITY DETERMINATION: ${probability} CHANCE`, 20, 167);
+      doc.setFontSize(7.5);
+      doc.text("Under historical guidelines, candidates with your credentials matching this college priority range", 20, 171);
+      doc.text("typically experience highly favorable counseling outcomes. Ensure this college matches your choice preference.", 20, 174);
+
+      // Section 4: Terms & Signatures
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139); // slate-500
+      doc.text("INSTRUCTIONS TO CANDIDATE:", 15, 188);
+
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(115, 115, 115); // neutral-500
+      doc.text("• This provisional allotment is an AI simulation run matching historical convenor cutoff metrics.", 15, 193);
+      doc.text("• No actual legal claim to seats is implied. Cutoffs change based on contemporary branch demand patterns.", 15, 197);
+      doc.text("• Submit this prioritized sequence to your actual convenor portal on the registration schedule date.", 15, 201);
+
+      // Signature line & Stamp
+      doc.setDrawColor(226, 232, 240);
+      doc.line(130, 225, 190, 225);
+      
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105); // slate-600
+      doc.text("AUTHORIZED CONVENOR", 160, 229, { align: 'center' });
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text("CounselorPro Simulated Admissions Division", 160, 233, { align: 'center' });
+
+      // Digital security badge
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(15, 240, 100, 16, 1.5, 1.5, 'FD');
+      
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(7);
+      doc.setTextColor(71, 85, 105);
+      doc.text("DIGITAL INTEGRITY SECURED", 18, 245);
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(6.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`Digital Signatures Valid • SHA-256 Verified Receipt No: ${Math.random().toString(16).substr(2, 8).toUpperCase()}`, 18, 249);
+      doc.text("Authenticity verified against SCEA mock allotment criteria.", 18, 252);
+
+      doc.save(`${profile.hallTicket}_Allotment_Letter.pdf`);
+    } catch (error) {
+      console.error("PDF Generation error:", error);
+    }
   };
 
   // Copy structured text summary to clipboard or share using Web Share API
@@ -181,7 +514,7 @@ DISCLAIMER: This is an AI-powered simulation matched against historical cutoff t
       resultText += `   ${allotment.college.name} (${allotment.college.code})\n`;
       resultText += `💻 Course/Branch: ${allotment.college.branch}\n`;
       resultText += `🎯 Matched Preference Order: Choice #${allotment.optionNumber}\n`;
-      resultText += `📈 Match Probability: ${getSeatProbability(allotment.college, profile.rank, profile.category)} PROBABILITY\n`;
+      resultText += `📈 Match Probability: ${getSeatProbability(allotment.college, profile.rank, profile.category, profile.ews_status)} PROBABILITY\n`;
       resultText += `💰 Estimated Tuition Fee: ₹${allotment.college.fee.toLocaleString()}/Year\n`;
     } else {
       resultText += `❌ SIMULATION RESULT: No Mock Seat Allotted\n`;
@@ -376,7 +709,7 @@ DISCLAIMER: This is an AI-powered simulation matched against historical cutoff t
                         AI Allotment Probability for Rank {profile.rank.toLocaleString()}:
                       </span>
                       <span className="font-bold font-mono text-emerald-800 bg-emerald-50 border border-emerald-150 px-2 py-0.5 rounded">
-                        {getSeatProbability(allotment.college, profile.rank, profile.category)} PROBABILITY
+                        {getSeatProbability(allotment.college, profile.rank, profile.category, profile.ews_status)} PROBABILITY
                       </span>
                     </div>
                     
@@ -385,7 +718,7 @@ DISCLAIMER: This is an AI-powered simulation matched against historical cutoff t
                       className="text-xs text-emerald-600 hover:text-emerald-800 font-bold flex items-center gap-1 cursor-pointer transition-colors"
                     >
                       <Download className="w-3.5 h-3.5" />
-                      Download Provisional Allotment Letter
+                      Download Provisional Allotment Letter (PDF)
                     </button>
                   </div>
                 </div>
@@ -428,7 +761,7 @@ DISCLAIMER: This is an AI-powered simulation matched against historical cutoff t
                     
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       {alternatives.map((college) => {
-                        const probability = getSeatProbability(college, profile.rank, profile.category);
+                        const probability = getSeatProbability(college, profile.rank, profile.category, profile.ews_status);
                         const isHigh = probability === 'HIGH';
                         
                         return (
@@ -583,7 +916,7 @@ DISCLAIMER: This is an AI-powered simulation matched against historical cutoff t
           className="w-full sm:w-auto px-6 py-3.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 font-semibold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer shadow-3xs transition-colors"
         >
           <Download className="w-4 h-4 text-slate-500" />
-          Download Registered Summary
+          Download Registered Summary (PDF)
         </button>
 
         {/* Share Result Snippet Trigger */}

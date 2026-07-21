@@ -19,7 +19,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let colleges: any[] = [];
     let source = "Memory fallback";
 
-    // A. First try to load from the static JSON file directly (very fast local fallback)
+    // A. Attempt Firestore Query (Requirement 2 & 6) - Real-time Check First
+    const firestoreDb = getFirestoreDb();
+    if (firestoreDb && !firestoreUnavailable) {
+      try {
+        let query: any = firestoreDb.collection("colleges");
+        if (examParam) {
+          query = query.where("exam", "==", examParam);
+        }
+        if (yearParam) {
+          query = query.where("year", "==", yearParam);
+        }
+        
+        // Use a limit of 8000 to ensure all institutional entries are retrieved
+        const snapshot = await query.limit(8000).get();
+        if (!snapshot.empty) {
+          snapshot.forEach((doc: any) => {
+            colleges.push(doc.data());
+          });
+          source = `Firebase Firestore ("colleges" collection)`;
+          console.log(`API fetched ${colleges.length} entries matching exam=${examParam}, year=${yearParam} from Firestore.`);
+          return res.json({ colleges, source, count: colleges.length });
+        }
+      } catch (firestoreErr: any) {
+        setFirestoreUnavailable(true);
+        console.log("Firestore temporarily offline or quota exceeded, falling back to static files:", firestoreErr.message);
+      }
+    }
+
+    // B. Fallback to the local static JSON files if Firestore query is empty, offline, or quota-exceeded
     if (examParam) {
       try {
         const staticFilename = `${examParam}_${yearParam}.json`;
@@ -32,34 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.json({ colleges, source, count: colleges.length });
         }
       } catch (staticErr: any) {
-        console.warn("Failed to serve colleges from static file:", staticErr.message);
-      }
-    }
-
-    // B. Attempt Firestore Query (Requirement 2 & 6)
-    const firestoreDb = getFirestoreDb();
-    if (firestoreDb && !firestoreUnavailable) {
-      try {
-        let query: any = firestoreDb.collection("colleges");
-        if (examParam) {
-          query = query.where("exam", "==", examParam);
-        }
-        if (yearParam) {
-          query = query.where("year", "==", yearParam);
-        }
-        
-        const snapshot = await query.limit(3000).get();
-        if (!snapshot.empty) {
-          snapshot.forEach((doc: any) => {
-            colleges.push(doc.data());
-          });
-          source = `Firebase Firestore ("colleges" collection)`;
-          console.log(`API fetched ${colleges.length} entries matching exam=${examParam}, year=${yearParam} from Firestore.`);
-          return res.json({ colleges, source, count: colleges.length });
-        }
-      } catch (firestoreErr: any) {
-        setFirestoreUnavailable(true);
-        console.log("Firestore temporarily offline, falling back to all-colleges files.", firestoreErr.message);
+        console.warn("Failed to serve colleges from static file fallback:", staticErr.message);
       }
     }
 

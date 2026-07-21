@@ -232,8 +232,8 @@ export async function generateStaticData() {
       } else {
         console.log('"colleges" collection is empty on Firestore. Seeding Firestore with default datasets...');
       }
-    } catch (dbErr) {
-      console.warn('Failed to read from "colleges" Firestore collection. Falling back to local files:', dbErr);
+    } catch (dbErr: any) {
+      console.log('Note: Firestore collection reading was bypassed or unavailable (using local file fallback):', dbErr?.message || dbErr);
     }
   }
 

@@ -116,13 +116,13 @@ export default function OptionEntry({ profile, selectedOptions, onUpdateOptions,
 
       // Probability
       if (selectedProb !== 'ALL') {
-        const prob = getSeatProbability(col, profile.rank, profile.category);
+        const prob = getSeatProbability(col, profile.rank, profile.category, profile.ews_status);
         if (prob !== selectedProb) return false;
       }
 
       return true;
     });
-  }, [collegesList, search, selectedBranch, selectedDistrict, selectedType, selectedProb, profile.rank, profile.category]);
+  }, [collegesList, search, selectedBranch, selectedDistrict, selectedType, selectedProb, profile.rank, profile.category, profile.ews_status]);
 
   // List of distinct districts & branches in the current exam database for drop-down filters
   const distinctDistricts = useMemo(() => {
@@ -394,7 +394,7 @@ export default function OptionEntry({ profile, selectedOptions, onUpdateOptions,
                     opt.collegeId === col.id || 
                     (opt.collegeCode.toLowerCase() === col.code.toLowerCase() && opt.branch.toLowerCase() === col.branch.toLowerCase())
                   );
-                  const prob = getSeatProbability(col, profile.rank, profile.category);
+                  const prob = getSeatProbability(col, profile.rank, profile.category, profile.ews_status);
                   
                   const probLabel = {
                     HIGH: { text: "HIGH CHANCE", color: "text-emerald-700 bg-emerald-50 border-emerald-200" },
@@ -781,7 +781,7 @@ export default function OptionEntry({ profile, selectedOptions, onUpdateOptions,
                     <td className="py-2.5 px-4 font-medium text-slate-500 font-mono">AI Seat Probability</td>
                     <td className="py-2.5 px-4 bg-slate-50/20 border-x border-slate-200 font-bold">
                       {(() => {
-                        const prob = getSeatProbability(compareCollegeA, profile.rank, profile.category);
+                        const prob = getSeatProbability(compareCollegeA, profile.rank, profile.category, profile.ews_status);
                         const colors = {
                           HIGH: 'text-emerald-700 bg-emerald-50 border border-emerald-100',
                           MEDIUM: 'text-teal-700 bg-teal-50 border border-teal-100',
@@ -793,7 +793,7 @@ export default function OptionEntry({ profile, selectedOptions, onUpdateOptions,
                     </td>
                     <td className="py-2.5 px-4 font-bold">
                       {(() => {
-                        const prob = getSeatProbability(compareCollegeB, profile.rank, profile.category);
+                        const prob = getSeatProbability(compareCollegeB, profile.rank, profile.category, profile.ews_status);
                         const colors = {
                           HIGH: 'text-emerald-700 bg-emerald-50 border border-emerald-100',
                           MEDIUM: 'text-teal-700 bg-teal-50 border border-teal-100',

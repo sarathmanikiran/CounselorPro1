@@ -1,7 +1,29 @@
 import { College, ExamType } from '../types';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getFirestore, collection, query, where, getDocs } from 'firebase/firestore';
 
 export let COLLEGES_DB: College[] = [];
 export let COLLEGES_SOURCE = 'Initial State';
+
+// Helper to retrieve/initialize the client-side Firebase and Firestore instance dynamically
+async function getClientFirestoreDb() {
+  if (getApps().length > 0) {
+    const app = getApp();
+    return getFirestore(app);
+  }
+
+  // Fetch the Firebase web client configuration dynamically
+  const response = await fetch('/api/config/firebase');
+  if (!response.ok) {
+    throw new Error('Failed to load Firebase configuration from the server API');
+  }
+  const config = await response.json();
+  if (!config.apiKey || !config.projectId) {
+    throw new Error('Firebase client configuration is incomplete or unavailable');
+  }
+  const app = initializeApp(config);
+  return getFirestore(app);
+}
 
 // In-memory client-side cache to prevent multiple network requests for the same file (Requirement 5)
 const clientCache: Record<string, College[]> = {};
@@ -40,6 +62,9 @@ export function normalizeCollege(item: any, index: number): College {
   const rawCutoffSCST = item.cutoffSCST || item.sc_boys || item.sc_girls || item.st_boys;
   const cutoffSCST = Number(rawCutoffSCST || 55000);
 
+  const rawCutoffEWS = item.oc_ews_boys || item.oc_ews_girls || item.cutoffEWS;
+  const cutoffEWS = rawCutoffEWS ? Number(rawCutoffEWS) : cutoffOC;
+
   return {
     id: item.id || `${(item.exam || 'ap_eapcet').toLowerCase()}-${code.toLowerCase()}-${branch.toLowerCase()}-${index}`,
     code,
@@ -51,6 +76,7 @@ export function normalizeCollege(item: any, index: number): College {
     cutoffOC,
     cutoffBC,
     cutoffSCST,
+    cutoffEWS,
     region: item.region || item.inst_region || 'AU',
     exam: item.exam || 'AP_EAPCET'
   };
@@ -70,59 +96,43 @@ export async function loadRealCollegesForExam(exam: ExamType | null, stream: 'MP
   if (!exam) return 0;
   
   const examGroup = getExamGroup(exam, stream);
-  const cacheKey = `${examGroup}_${year}`;
+  
+  console.log(`[CLIENT FETCHING] Directly querying Firestore using Firebase App instance for exam: ${examGroup}, year: ${year}...`);
 
-  // Serve from in-memory cache if available (Requirement 5)
-  if (clientCache[cacheKey]) {
-    console.log(`[CLIENT CACHE HIT] Serving ${clientCache[cacheKey].length} colleges for ${cacheKey} from cache.`);
-    COLLEGES_DB.length = 0;
-    COLLEGES_DB.push(...clientCache[cacheKey]);
-    COLLEGES_SOURCE = `Static Cache (${examGroup})`;
-    return COLLEGES_DB.length;
-  }
-
-  // Fetch only the specific static JSON file (Requirement 4)
   try {
-    const filename = `${examGroup}_${year}.json`;
-    console.log(`[CLIENT FETCHING] Requesting static data file: /data/${filename}`);
-    const res = await fetch(`/data/${filename}`);
-    if (!res.ok) {
-      throw new Error(`Static file /data/${filename} returned status ${res.status}`);
-    }
-    const data = await res.json();
-    if (Array.isArray(data) && data.length > 0) {
-      const normalized = data.map((item, idx) => normalizeCollege(item, idx));
-      clientCache[cacheKey] = normalized;
-      COLLEGES_DB.length = 0;
-      COLLEGES_DB.push(...normalized);
-      COLLEGES_SOURCE = `Static File (${examGroup}_${year})`;
-      console.log(`[CLIENT SUCCESS] Loaded and cached ${normalized.length} colleges from static JSON file.`);
-      return normalized.length;
-    }
-  } catch (err) {
-    console.warn(`[CLIENT FETCH WARN] Failed to load static JSON /data/${examGroup}_${year}.json:`, err);
+    const db = await getClientFirestoreDb();
+    const collegesRef = collection(db, "colleges");
+    const q = query(
+      collegesRef,
+      where("exam", "==", examGroup),
+      where("year", "==", year)
+    );
     
-    // Fallback to the dynamic /api/colleges route (Requirement 6)
-    try {
-      console.log(`[CLIENT FALLBACK] Fetching colleges from dynamic API path: /api/colleges?exam=${examGroup}&year=${year}`);
-      const res = await fetch(`/api/colleges?exam=${examGroup}&year=${year}`);
-      if (!res.ok) throw new Error('Dynamic API returned error');
-      const data = await res.json();
-      if (data && Array.isArray(data.colleges) && data.colleges.length > 0) {
-        const normalized = data.colleges.map((item, idx) => normalizeCollege(item, idx));
-        clientCache[cacheKey] = normalized;
-        COLLEGES_DB.length = 0;
-        COLLEGES_DB.push(...normalized);
-        COLLEGES_SOURCE = data.source || 'Live Database Fallback';
-        console.log(`[CLIENT SUCCESS] Loaded and cached ${normalized.length} colleges from dynamic API fallback.`);
-        return normalized.length;
-      }
-    } catch (apiErr) {
-      console.error('[CLIENT FATAL] All college retrieval strategies failed:', apiErr);
-    }
-  }
+    const querySnapshot = await getDocs(q);
 
-  return 0;
+    // Implement proper error handling for empty result sets
+    if (querySnapshot.empty) {
+      throw new Error(`Empty result set: The Firestore database contains no records for "${examGroup}" in year ${year}. Please upload the dataset via the Admin Console.`);
+    }
+
+    const fetchedColleges: any[] = [];
+    querySnapshot.forEach((doc) => {
+      fetchedColleges.push({ id: doc.id, ...doc.data() });
+    });
+
+    const normalized = fetchedColleges.map((item, idx) => normalizeCollege(item, idx));
+    
+    // Update COLLEGES_DB in-place
+    COLLEGES_DB.length = 0;
+    COLLEGES_DB.push(...normalized);
+    COLLEGES_SOURCE = 'Real-time Firestore (Client SDK)';
+    
+    console.log(`[CLIENT SUCCESS] Successfully loaded ${normalized.length} colleges directly from Firestore using Firebase Web SDK.`);
+    return normalized.length;
+  } catch (err: any) {
+    console.error(`[CLIENT ERROR] Direct Firestore query failed:`, err);
+    throw err;
+  }
 }
 
 // Deprecated single load wrapper to retain backwards compatibility
@@ -131,7 +141,10 @@ export async function loadRealColleges(): Promise<number> {
 }
 
 // Helper to get cutoff based on student details
-export function getCollegeCutoff(college: College, category: string): number {
+export function getCollegeCutoff(college: College, category: string, ews_status?: boolean): number {
+  if (ews_status || category === 'EWS') {
+    return college.cutoffEWS || college.cutoffOC;
+  }
   if (category.startsWith('BC')) {
     return college.cutoffBC;
   }
@@ -142,8 +155,8 @@ export function getCollegeCutoff(college: College, category: string): number {
 }
 
 // Helper to determine AI allotment probability
-export function getSeatProbability(college: College, rank: number, category: string): 'HIGH' | 'MEDIUM' | 'LOW' | 'VERY_LOW' {
-  const cutoff = getCollegeCutoff(college, category);
+export function getSeatProbability(college: College, rank: number, category: string, ews_status?: boolean): 'HIGH' | 'MEDIUM' | 'LOW' | 'VERY_LOW' {
+  const cutoff = getCollegeCutoff(college, category, ews_status);
   
   if (rank <= cutoff * 0.8) {
     return 'HIGH';

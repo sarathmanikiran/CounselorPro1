@@ -1,5 +1,7 @@
 import { VercelRequest, VercelResponse } from "@vercel/node";
 import { getFirebaseApp, getFirestoreDb, getFirebaseAuth, setCachedColleges, setFirestoreUnavailable } from "../_lib/index";
+import fs from "fs";
+import path from "path";
 
 export const config = { maxDuration: 60 };
 
@@ -182,7 +184,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             console.log(`[UPLOAD DIAGNOSTIC] Cleared ${existingSnapshot.size} stale database records for ${combExam}.`);
           }
         } catch (clearErr: any) {
-          console.error(`[UPLOAD DIAGNOSTIC ERROR] Error during collection cleaning for ${combExam}:`, clearErr);
+          console.log(`[UPLOAD DIAGNOSTIC] Non-blocking note during collection cleaning for ${combExam}:`, clearErr.message || clearErr);
         }
       });
       await Promise.all(cleanPromises);
@@ -195,6 +197,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let failCount = 0;
     const batchSize = 400;
     const writePromises = [];
+    const entriesByFile: Record<string, any[]> = {};
 
     try {
       for (let i = 0; i < data.length; i += batchSize) {
@@ -224,6 +227,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             year: entryYear
           });
 
+          const targetFilename = `${entryExam}_${entryYear}.json`;
+          if (!entriesByFile[targetFilename]) {
+            entriesByFile[targetFilename] = [];
+          }
+          entriesByFile[targetFilename].push(preparedEntry);
+
           // Generate highly deterministic and clean document ID to prevent duplicates
           const instCode = String(entry.inst_code || entry.code || "unknown").toUpperCase().replace(/[^A-Z0-9-_]/g, '_');
           const branchCode = String(entry.branch_code || entry.branch || "unknown").toUpperCase().replace(/[^A-Z0-9-_]/g, '_');
@@ -245,6 +254,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await Promise.all(writePromises);
       if (failCount > 0) {
         throw new Error(`Failed to commit ${failCount} documents in write batch.`);
+      }
+
+      // Synchronize to local replica files so they are available in real-time even under database quota limits
+      for (const [filename, entries] of Object.entries(entriesByFile)) {
+        const publicPath = path.join(process.cwd(), "public", "data", filename);
+        const distPath = path.join(process.cwd(), "dist", "data", filename);
+
+        let fileEntries: any[] = [];
+        if (chunkIndex === 0) {
+          fileEntries = entries;
+        } else {
+          try {
+            if (fs.existsSync(publicPath)) {
+              fileEntries = JSON.parse(fs.readFileSync(publicPath, "utf8"));
+            } else if (fs.existsSync(distPath)) {
+              fileEntries = JSON.parse(fs.readFileSync(distPath, "utf8"));
+            }
+          } catch (readErr) {
+            fileEntries = [];
+          }
+          fileEntries = [...fileEntries, ...entries];
+        }
+
+        try {
+          const publicDir = path.dirname(publicPath);
+          if (!fs.existsSync(publicDir)) {
+            fs.mkdirSync(publicDir, { recursive: true });
+          }
+          fs.writeFileSync(publicPath, JSON.stringify(fileEntries, null, 2), "utf8");
+          console.log(`[LOCAL REPLICA SUCCESS] Synchronized ${fileEntries.length} colleges to ${publicPath}`);
+        } catch (writePublicErr: any) {
+          console.error(`[LOCAL REPLICA WARN] Failed to write to public path ${publicPath}:`, writePublicErr.message);
+        }
+
+        try {
+          const distDir = path.dirname(distPath);
+          if (!fs.existsSync(distDir)) {
+            fs.mkdirSync(distDir, { recursive: true });
+          }
+          fs.writeFileSync(distPath, JSON.stringify(fileEntries, null, 2), "utf8");
+          console.log(`[LOCAL REPLICA SUCCESS] Synchronized ${fileEntries.length} colleges to ${distPath}`);
+        } catch (writeDistErr: any) {
+          console.error(`[LOCAL REPLICA WARN] Failed to write to dist path ${distPath}:`, writeDistErr.message);
+        }
       }
     } catch (writeErr: any) {
       console.error("[UPLOAD DIAGNOSTIC ERROR] Firestore batch write error:", writeErr);

@@ -196,6 +196,9 @@ export function mapRawToCollege(item: any, index: number, examType: string): any
   }
   const cutoffSCST = Number(rawCutoffSCST || 55000);
 
+  const rawCutoffEWS = item.oc_ews_boys || item.oc_ews_girls || item.cutoffEWS;
+  const cutoffEWS = rawCutoffEWS ? Number(rawCutoffEWS) : cutoffOC;
+
   return {
     id: `${actualExam.toLowerCase()}-${(item.inst_code || item.code || 'col').toLowerCase()}-${(item.branch_code || item.branch || 'cse').toLowerCase()}-${index}`,
     code: item.inst_code || item.code || 'UNKN',
@@ -207,6 +210,7 @@ export function mapRawToCollege(item: any, index: number, examType: string): any
     cutoffOC,
     cutoffBC,
     cutoffSCST,
+    cutoffEWS,
     region: item.inst_region || item.region || 'AU',
     exam: actualExam
   };

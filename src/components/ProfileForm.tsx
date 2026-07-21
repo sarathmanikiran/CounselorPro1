@@ -232,11 +232,19 @@ export default function ProfileForm({ exam, profile, onChange, onNext, onBack }:
             <label className="block text-sm font-semibold text-slate-700">Category</label>
             <select
               value={profile.category}
-              onChange={(e) => onChange({ ...profile, category: e.target.value as any })}
+              onChange={(e) => {
+                const val = e.target.value as any;
+                onChange({
+                  ...profile,
+                  category: val,
+                  ews_status: val === 'EWS' ? true : (val === 'OC' ? profile.ews_status : false)
+                });
+              }}
               id="category-select"
-              className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 bg-white text-sm"
+              className="w-full px-4 py-2.5 rounded-lg border border-emerald-500 bg-emerald-50/5 text-emerald-950 focus:outline-none focus:ring-2 focus:ring-emerald-600/30 focus:border-emerald-600 font-semibold text-sm transition-all duration-200 shadow-sm shadow-emerald-100/50"
             >
               <option value="OC">OC (Open Competition)</option>
+              <option value="EWS">OC-EWS (Economically Weaker Section)</option>
               <option value="BC-A">BC-A (Backward Class A)</option>
               <option value="BC-B">BC-B (Backward Class B)</option>
               <option value="BC-C">BC-C (Backward Class C)</option>
@@ -270,6 +278,37 @@ export default function ProfileForm({ exam, profile, onChange, onNext, onBack }:
           </div>
         </div>
 
+        {/* EWS (Economically Weaker Section) Section */}
+        {(profile.category === 'OC' || profile.category === 'EWS') && (
+          <div className="p-4 bg-emerald-50/40 border border-emerald-100 rounded-xl flex items-center justify-between gap-4 transition-all duration-300" id="ews-eligibility-section">
+            <div className="space-y-1 flex-1">
+              <span className="text-[10px] font-mono tracking-wider font-extrabold text-emerald-700 uppercase block">Reservation Quota</span>
+              <h4 className="font-sans font-bold text-slate-800 text-sm">Economically Weaker Section (EWS) Benefit</h4>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Check this if you possess a valid EWS certificate. This grants you a separate EWS reservation cutoff, giving you an entry advantage (higher rank cutoffs) at leading colleges.
+              </p>
+            </div>
+            <div className="flex-shrink-0">
+              <label className="relative inline-flex items-center cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  id="ews-checkbox"
+                  checked={!!profile.ews_status || profile.category === 'EWS'}
+                  disabled={profile.category === 'EWS'}
+                  onChange={(e) => {
+                    onChange({
+                      ...profile,
+                      ews_status: e.target.checked
+                    });
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 rounded-full peer peer-focus:ring-2 peer-focus:ring-emerald-600/20 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+              </label>
+            </div>
+          </div>
+        )}
+
         {/* Dynamic Rank Guidance Panel */}
         {rankFeedback && (
           <div className={`p-4 rounded-xl space-y-1 transition-all ${rankFeedback.color}`}>
@@ -287,7 +326,7 @@ export default function ProfileForm({ exam, profile, onChange, onNext, onBack }:
           <div className="space-y-1 leading-relaxed">
             <span className="font-bold block">How Reservation Categories Affect Your Allotment</span>
             <p>
-              Under NIC counselling rules, if a seat is available in your social category (e.g., <strong>{profile.category}</strong>), the system attempts to allocate it there first. If no category seats remain, you are automatically matched against general <strong>OC</strong> cutoff limits.
+              Under NIC counselling rules, if a seat is available in your social category (e.g., <strong>{profile.category}</strong>{profile.ews_status ? ' with EWS reservation' : ''}), the system attempts to allocate it there first. If no category seats remain, you are automatically matched against general <strong>OC</strong> cutoff limits.
             </p>
           </div>
         </div>

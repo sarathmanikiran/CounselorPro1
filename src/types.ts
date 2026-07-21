@@ -5,9 +5,10 @@ export interface StudentProfile {
   stream: 'MPC' | 'BiPC';
   rank: number;
   gender: 'Male' | 'Female';
-  category: 'OC' | 'BC-A' | 'BC-B' | 'BC-C' | 'BC-D' | 'BC-E' | 'SC' | 'ST';
+  category: 'OC' | 'BC-A' | 'BC-B' | 'BC-C' | 'BC-D' | 'BC-E' | 'SC' | 'ST' | 'EWS';
   region: 'AU' | 'SVU' | 'OU';
   hallTicket: string;
+  ews_status?: boolean;
 }
 
 export interface College {
@@ -21,6 +22,7 @@ export interface College {
   cutoffOC: number;
   cutoffBC: number;
   cutoffSCST: number;
+  cutoffEWS?: number;
   region: 'AU' | 'SVU' | 'OU';
   exam: ExamType;
 }
